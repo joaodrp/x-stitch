@@ -42,7 +42,7 @@ them back into a single JPEG.
 
 ## Install
 
-Requires a Rust toolchain (edition 2024):
+Requires a Rust toolchain (minimum version: `rust-version` in `Cargo.toml`):
 
 ```sh
 cargo install --path .
