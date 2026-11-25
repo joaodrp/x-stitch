@@ -1,0 +1,12 @@
+[package]
+name = "x-stitch"
+version = "0.1.0"
+edition = "2024"
+description = "Download and stitch segmented X/Twitter carousel images into a single full-resolution image"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+serde = { version = "1", features = ["derive"] }
+ureq = { version = "2", features = ["json"] }
