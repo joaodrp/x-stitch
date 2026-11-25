@@ -70,7 +70,6 @@ struct FxResponse {
 
 #[derive(Debug, Deserialize)]
 struct FxTweet {
-    id: String,
     author: FxAuthor,
     media: Option<FxMedia>,
 }
@@ -177,6 +176,7 @@ fn process_tweet(
         .into_json()
         .with_context(|| format!("failed to parse metadata from {api_url}"))?;
 
+    let screen_name = safe_screen_name(&resp.tweet.author.screen_name)?;
     let photos = resp.tweet.media.map(|m| m.photos).unwrap_or_default();
 
     if photos.is_empty() {
@@ -198,17 +198,10 @@ fn process_tweet(
     let width = stitched.width();
     let height = stitched.height();
 
-    let source_url = format!(
-        "https://x.com/{}/status/{}",
-        resp.tweet.author.screen_name, resp.tweet.id
-    );
+    let source_url = format!("https://x.com/{screen_name}/status/{}", tweet_ref.id);
     let comment = options.embed_metadata.then_some(source_url.as_str());
 
-    let filename = resolve_filename(
-        options.custom_name,
-        &resp.tweet.author.screen_name,
-        &resp.tweet.id,
-    );
+    let filename = resolve_filename(options.custom_name, screen_name, &tweet_ref.id);
     let out_path = options.out_dir.join(filename);
     let bytes = encode_jpeg(&stitched, options.quality, comment)?;
     fs::write(&out_path, bytes)
@@ -371,6 +364,14 @@ fn stitch_images(images: &[DynamicImage], orientation: Orientation) -> Result<Rg
     Ok(canvas)
 }
 
+/// The screen name comes from the metadata API and ends up in the output path.
+fn safe_screen_name(name: &str) -> Result<&str> {
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        bail!("unexpected screen name in API response: {name:?}");
+    }
+    Ok(name)
+}
+
 fn resolve_filename(custom_name: Option<&str>, screen_name: &str, status_id: &str) -> String {
     match custom_name {
         Some(name) => {
@@ -499,6 +500,7 @@ mod tests {
     #[test]
     fn resolves_filenames() {
         assert_eq!(resolve_filename(None, "user", "123"), "user-123.jpg");
+        assert_eq!(resolve_filename(None, "user_1", "123"), "user_1-123.jpg");
         assert_eq!(
             resolve_filename(Some("panorama"), "user", "123"),
             "panorama.jpg"
@@ -511,6 +513,14 @@ mod tests {
             resolve_filename(Some("PANORAMA.JPG"), "user", "123"),
             "PANORAMA.JPG"
         );
+    }
+
+    #[test]
+    fn rejects_screen_names_that_are_not_plain_handles() {
+        for bad in ["../../etc/x", "a/b", "", "..", "a b"] {
+            assert!(safe_screen_name(bad).is_err(), "{bad:?} should be rejected");
+        }
+        assert_eq!(safe_screen_name("user_1").unwrap(), "user_1");
     }
 
     #[test]
