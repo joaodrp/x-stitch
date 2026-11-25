@@ -103,3 +103,7 @@ x-stitch <url> -q 90 --no-metadata
   warning is printed to `stderr`.
 - **Single-photo posts:** A JPEG is saved exactly as X serves it, with only the
   `COM` comment added. Any other format is re-encoded as JPEG.
+
+## License
+
+[MIT](LICENSE)

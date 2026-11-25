@@ -3,6 +3,7 @@ name = "x-stitch"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
+license = "MIT"
 description = "Download and stitch segmented X/Twitter carousel images into a single full-resolution image"
 
 [dependencies]
