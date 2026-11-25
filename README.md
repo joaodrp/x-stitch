@@ -2,11 +2,14 @@
 
 <p align="center">
   <em><b>Turn split X carousels back into one full-resolution image.</b></em><br>
-  Pass a post URL, get one stitched image back — no API key, no manual alignment.
+  Pass a post URL, get one stitched image back. No API key, no manual alignment.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Rust-2024-orange" alt="Rust 2024">
+  <a href="https://github.com/joaodrp/x-stitch/actions/workflows/ci.yml"><img src="https://github.com/joaodrp/x-stitch/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/x-stitch"><img src="https://img.shields.io/crates/v/x-stitch" alt="crates.io version"></a>
+  <a href="Cargo.toml"><img src="https://img.shields.io/crates/msrv/x-stitch?logo=rust" alt="Minimum supported Rust version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
 
 <p align="center">
@@ -23,25 +26,31 @@ them back into a single JPEG.
 
 ## Highlights
 
-- 🧵 **Full-resolution segments.** Rewrites every media URL to `name=orig`
+- **Full-resolution segments.** Rewrites every media URL to `name=orig`
   before downloading.
-- ⚡ **Parallel downloads.** Fetches all segments concurrently over a shared
+- **Parallel downloads.** Fetches all segments concurrently over a shared
   HTTP client with timeouts.
-- 🔑 **No account or API key.** Resolves post metadata through
+- **No account or API key.** Resolves post metadata through
   `api.fxtwitter.com`.
-- 🔗 **Forgiving URL parsing.** Works with `x.com`, `twitter.com`, `mobile.*`,
+- **Forgiving URL parsing.** Works with `x.com`, `twitter.com`, `mobile.*`,
   `fxtwitter.com`, `vxtwitter.com`, `fixupx.com`, `/i/web/status/...`, and
   links with `/photo/1` or tracking parameters.
-- ↕️ **Horizontal or vertical.** Stitches left-to-right by default, or
+- **Horizontal or vertical.** Stitches left-to-right by default, or
   top-to-bottom with `--vertical`.
-- 📦 **Resilient batch mode.** Pass multiple URLs in one run — a deleted or
+- **Resilient batch mode.** Pass multiple URLs in one run; a deleted or
   photo-less post won't abort the rest.
-- 🏷️ **Traceable files.** Embeds the canonical post URL in the JPEG `COM`
+- **Traceable files.** Embeds the canonical post URL in the JPEG `COM`
   comment marker so renamed wallpapers stay linked to their source.
 
 ## Install
 
 Requires a Rust toolchain (minimum version: `rust-version` in `Cargo.toml`):
+
+```sh
+cargo install x-stitch
+```
+
+Or from a checkout:
 
 ```sh
 cargo install --path .
