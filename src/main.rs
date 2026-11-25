@@ -1,5 +1,5 @@
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -131,13 +131,6 @@ fn main() -> Result<()> {
         embed_metadata: !cli.no_metadata,
     };
 
-    if cli.urls.len() == 1 {
-        let tweet_ref = parse_tweet_url(&cli.urls[0])?;
-        let saved = process_tweet(&agent, &tweet_ref, &options)?;
-        print_saved(&saved);
-        return Ok(());
-    }
-
     let mut failures = 0usize;
     for raw_url in &cli.urls {
         let result = parse_tweet_url(raw_url)
@@ -215,9 +208,11 @@ fn process_tweet(
         options.custom_name,
         &resp.tweet.author.screen_name,
         &resp.tweet.id,
-    )?;
+    );
     let out_path = options.out_dir.join(filename);
-    save_jpeg(&stitched, &out_path, options.quality, comment)?;
+    let bytes = encode_jpeg(&stitched, options.quality, comment)?;
+    fs::write(&out_path, bytes)
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
 
     Ok(SavedImage {
         path: out_path,
@@ -315,17 +310,7 @@ fn download_images(agent: &ureq::Agent, urls: &[String]) -> Result<Vec<DynamicIm
                         .call()
                         .with_context(|| format!("failed to download {url}"))?;
 
-                    let content_len = resp
-                        .header("Content-Length")
-                        .and_then(|v| v.parse::<u64>().ok());
-                    if let Some(len) = content_len
-                        && len > MAX_IMAGE_BYTES
-                    {
-                        bail!("image {url} exceeds maximum size of {MAX_IMAGE_BYTES} bytes");
-                    }
-
-                    let mut buf =
-                        content_len.map_or_else(Vec::new, |len| Vec::with_capacity(len as usize));
+                    let mut buf = Vec::new();
                     resp.into_reader()
                         .take(MAX_IMAGE_BYTES + 1)
                         .read_to_end(&mut buf)
@@ -353,65 +338,51 @@ fn stitch_images(images: &[DynamicImage], orientation: Orientation) -> Result<Rg
         bail!("cannot stitch empty image list");
     }
 
-    match orientation {
-        Orientation::Horizontal => {
-            let total_width = images
-                .iter()
-                .try_fold(0u32, |acc, img| acc.checked_add(img.width()))
-                .context("stitched image width overflow")?;
-            let total_height = images.iter().map(DynamicImage::height).max().unwrap_or(0);
-
-            let mut canvas = RgbImage::new(total_width, total_height);
-            let mut x_offset = 0u32;
-            for img in images {
-                let rgb = img.to_rgb8();
-                canvas
-                    .copy_from(&rgb, x_offset, 0)
-                    .context("failed to copy horizontal segment")?;
-                x_offset += rgb.width();
-            }
-            Ok(canvas)
+    let vertical = orientation == Orientation::Vertical;
+    // (length along the stitch axis, length across it)
+    let dims = |img: &DynamicImage| {
+        if vertical {
+            (img.height(), img.width())
+        } else {
+            (img.width(), img.height())
         }
-        Orientation::Vertical => {
-            let total_width = images.iter().map(DynamicImage::width).max().unwrap_or(0);
-            let total_height = images
-                .iter()
-                .try_fold(0u32, |acc, img| acc.checked_add(img.height()))
-                .context("stitched image height overflow")?;
+    };
 
-            let mut canvas = RgbImage::new(total_width, total_height);
-            let mut y_offset = 0u32;
-            for img in images {
-                let rgb = img.to_rgb8();
-                canvas
-                    .copy_from(&rgb, 0, y_offset)
-                    .context("failed to copy vertical segment")?;
-                y_offset += rgb.height();
-            }
-            Ok(canvas)
-        }
+    let along = images
+        .iter()
+        .try_fold(0u32, |acc, img| acc.checked_add(dims(img).0))
+        .context("stitched image size overflow")?;
+    let across = images.iter().map(|img| dims(img).1).max().unwrap_or(0);
+
+    let (width, height) = if vertical {
+        (across, along)
+    } else {
+        (along, across)
+    };
+    let mut canvas = RgbImage::new(width, height);
+    let mut offset = 0u32;
+    for img in images {
+        let (x, y) = if vertical { (0, offset) } else { (offset, 0) };
+        canvas
+            .copy_from(&img.to_rgb8(), x, y)
+            .context("failed to copy segment")?;
+        offset += dims(img).0;
     }
+    Ok(canvas)
 }
 
-fn resolve_filename(
-    custom_name: Option<&str>,
-    screen_name: &str,
-    status_id: &str,
-) -> Result<String> {
+fn resolve_filename(custom_name: Option<&str>, screen_name: &str, status_id: &str) -> String {
     match custom_name {
         Some(name) => {
             let trimmed = name.trim();
-            if trimmed.is_empty() {
-                bail!("custom filename cannot be empty");
-            }
             let lower = trimmed.to_ascii_lowercase();
             if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-                Ok(trimmed.to_string())
+                trimmed.to_string()
             } else {
-                Ok(format!("{trimmed}.jpg"))
+                format!("{trimmed}.jpg")
             }
         }
-        None => Ok(format!("{screen_name}-{status_id}.jpg")),
+        None => format!("{screen_name}-{status_id}.jpg"),
     }
 }
 
@@ -451,15 +422,6 @@ fn encode_jpeg(img: &RgbImage, quality: u8, comment: Option<&str>) -> Result<Vec
     out.extend_from_slice(comment_bytes);
     out.extend_from_slice(&raw[insert_at..]);
     Ok(out)
-}
-
-fn save_jpeg(img: &RgbImage, path: &Path, quality: u8, comment: Option<&str>) -> Result<()> {
-    let bytes = encode_jpeg(img, quality, comment)?;
-    let mut file = File::create(path)
-        .with_context(|| format!("failed to create output file {}", path.display()))?;
-    file.write_all(&bytes)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -536,23 +498,19 @@ mod tests {
 
     #[test]
     fn resolves_filenames() {
+        assert_eq!(resolve_filename(None, "user", "123"), "user-123.jpg");
         assert_eq!(
-            resolve_filename(None, "user", "123").unwrap(),
-            "user-123.jpg"
-        );
-        assert_eq!(
-            resolve_filename(Some("panorama"), "user", "123").unwrap(),
+            resolve_filename(Some("panorama"), "user", "123"),
             "panorama.jpg"
         );
         assert_eq!(
-            resolve_filename(Some("panorama.jpg"), "user", "123").unwrap(),
+            resolve_filename(Some("panorama.jpg"), "user", "123"),
             "panorama.jpg"
         );
         assert_eq!(
-            resolve_filename(Some("PANORAMA.JPG"), "user", "123").unwrap(),
+            resolve_filename(Some("PANORAMA.JPG"), "user", "123"),
             "PANORAMA.JPG"
         );
-        assert!(resolve_filename(Some("   "), "user", "123").is_err());
     }
 
     #[test]
