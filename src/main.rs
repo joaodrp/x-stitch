@@ -15,6 +15,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Per socket read or write, so a slow download survives as long as data keeps arriving.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IMAGE_BYTES: u64 = 100 * 1024 * 1024;
+const JPEG_SOI: [u8; 2] = [0xFF, 0xD8];
 
 #[derive(Parser, Debug)]
 #[command(name = "x-stitch", version, about)]
@@ -89,6 +90,11 @@ struct FxMedia {
 #[derive(Debug, Deserialize)]
 struct FxPhoto {
     url: String,
+}
+
+struct Photo {
+    bytes: Vec<u8>,
+    image: DynamicImage,
 }
 
 struct SavedImage {
@@ -194,19 +200,19 @@ fn process_tweet(
         .into_iter()
         .map(|p| ensure_orig_url(&p.url))
         .collect();
-    let images = download_images(agent, &photo_urls)?;
-    let segments = images.len();
-
-    let stitched = stitch_images(&images, options.orientation)?;
-    let width = stitched.width();
-    let height = stitched.height();
+    let downloads = download_images(agent, &photo_urls)?;
+    let segments = downloads.len();
+    let (jpeg, width, height) = render(downloads, options.orientation, options.quality)?;
 
     let source_url = format!("https://x.com/{screen_name}/status/{}", tweet_ref.id);
     let comment = options.embed_metadata.then_some(source_url.as_str());
 
     let filename = resolve_filename(options.custom_name, screen_name, &tweet_ref.id);
     let out_path = options.out_dir.join(filename);
-    let bytes = encode_jpeg(&stitched, options.quality, comment)?;
+    let bytes = match comment {
+        Some(comment) => insert_jpeg_comment(&jpeg, comment)?,
+        None => jpeg,
+    };
     fs::create_dir_all(options.out_dir).with_context(|| {
         format!(
             "failed to create output directory {}",
@@ -301,12 +307,12 @@ fn ensure_orig_url(url: &str) -> String {
     format!("{base}?{}", params.join("&"))
 }
 
-fn download_images(agent: &ureq::Agent, urls: &[String]) -> Result<Vec<DynamicImage>> {
+fn download_images(agent: &ureq::Agent, urls: &[String]) -> Result<Vec<Photo>> {
     thread::scope(|scope| {
         let handles: Vec<_> = urls
             .iter()
             .map(|url| {
-                scope.spawn(move || -> Result<DynamicImage> {
+                scope.spawn(move || -> Result<Photo> {
                     let resp = agent
                         .get(url)
                         .call()
@@ -322,8 +328,9 @@ fn download_images(agent: &ureq::Agent, urls: &[String]) -> Result<Vec<DynamicIm
                         bail!("image {url} exceeds maximum size of {MAX_IMAGE_BYTES} bytes");
                     }
 
-                    image::load_from_memory(&buf)
-                        .with_context(|| format!("failed to decode image from {url}"))
+                    let image = image::load_from_memory(&buf)
+                        .with_context(|| format!("failed to decode image from {url}"))?;
+                    Ok(Photo { bytes: buf, image })
                 })
             })
             .collect();
@@ -333,6 +340,24 @@ fn download_images(agent: &ureq::Agent, urls: &[String]) -> Result<Vec<DynamicIm
             .map(|h| h.join().expect("download thread panicked"))
             .collect()
     })
+}
+
+/// Returns the output JPEG and its dimensions. A lone JPEG is passed through untouched,
+/// since re-encoding it would only lose quality.
+fn render(
+    mut photos: Vec<Photo>,
+    orientation: Orientation,
+    quality: u8,
+) -> Result<(Vec<u8>, u32, u32)> {
+    if photos.len() == 1 && photos[0].bytes.starts_with(&JPEG_SOI) {
+        let photo = photos.remove(0);
+        return Ok((photo.bytes, photo.image.width(), photo.image.height()));
+    }
+
+    let images: Vec<DynamicImage> = photos.into_iter().map(|p| p.image).collect();
+    let stitched = stitch_images(&images, orientation)?;
+    let jpeg = encode_jpeg(&stitched, quality)?;
+    Ok((jpeg, stitched.width(), stitched.height()))
 }
 
 fn stitch_images(images: &[DynamicImage], orientation: Orientation) -> Result<RgbImage> {
@@ -396,17 +421,17 @@ fn resolve_filename(custom_name: Option<&str>, screen_name: &str, status_id: &st
     }
 }
 
-fn encode_jpeg(img: &RgbImage, quality: u8, comment: Option<&str>) -> Result<Vec<u8>> {
-    let mut raw = Vec::new();
-    let mut encoder = JpegEncoder::new_with_quality(&mut raw, quality);
-    encoder.encode_image(img).context("failed to encode JPEG")?;
+fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
+    let mut jpeg = Vec::new();
+    JpegEncoder::new_with_quality(&mut jpeg, quality)
+        .encode_image(img)
+        .context("failed to encode JPEG")?;
+    Ok(jpeg)
+}
 
-    let Some(comment) = comment else {
-        return Ok(raw);
-    };
-
-    if !raw.starts_with(&[0xFF, 0xD8]) {
-        bail!("encoded JPEG missing SOI marker");
+fn insert_jpeg_comment(raw: &[u8], comment: &str) -> Result<Vec<u8>> {
+    if !raw.starts_with(&JPEG_SOI) {
+        bail!("JPEG missing SOI marker");
     }
 
     let comment_bytes = comment.as_bytes();
@@ -581,11 +606,39 @@ mod tests {
     }
 
     #[test]
+    fn passes_a_lone_jpeg_through_and_re_encodes_everything_else() {
+        let image = RgbImage::from_pixel(4, 4, Rgb([10, 20, 30]));
+        let original = encode_jpeg(&image, 50).unwrap();
+        let photo = |bytes: &[u8]| Photo {
+            bytes: bytes.to_vec(),
+            image: DynamicImage::ImageRgb8(image.clone()),
+        };
+
+        let (jpeg, width, height) =
+            render(vec![photo(&original)], Orientation::Horizontal, 95).unwrap();
+        assert_eq!(jpeg, original);
+        assert_eq!((width, height), (4, 4));
+
+        let (jpeg, ..) = render(vec![photo(b"\x89PNG")], Orientation::Horizontal, 95).unwrap();
+        assert!(jpeg.starts_with(&JPEG_SOI));
+
+        let (jpeg, width, height) = render(
+            vec![photo(&original), photo(&original)],
+            Orientation::Horizontal,
+            95,
+        )
+        .unwrap();
+        assert_ne!(jpeg, original);
+        assert_eq!((width, height), (8, 4));
+    }
+
+    #[test]
     fn embeds_jpeg_comment_after_app0_and_skips_when_none() {
         let img = RgbImage::from_pixel(4, 4, Rgb([10, 20, 30]));
         let url = "https://x.com/user/status/1234567890";
 
-        let with_meta = encode_jpeg(&img, 95, Some(url)).unwrap();
+        let without_meta = encode_jpeg(&img, 95).unwrap();
+        let with_meta = insert_jpeg_comment(&without_meta, url).unwrap();
         assert_eq!(&with_meta[0..4], &[0xFF, 0xD8, 0xFF, 0xE0]);
         let app0_len = u16::from_be_bytes([with_meta[4], with_meta[5]]) as usize;
         let com_start = 4 + app0_len;
@@ -601,7 +654,6 @@ mod tests {
             (4, 4)
         );
 
-        let without_meta = encode_jpeg(&img, 95, None).unwrap();
         assert_eq!(&without_meta[0..4], &[0xFF, 0xD8, 0xFF, 0xE0]);
         assert_ne!(&without_meta[com_start..com_start + 2], &[0xFF, 0xFE]);
     }

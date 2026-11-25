@@ -2,7 +2,7 @@
 
 <p align="center">
   <em><b>Turn split X carousels back into one full-resolution image.</b></em><br>
-  Pass a post URL, get the stitched original back — no API key, no manual alignment.
+  Pass a post URL, get one stitched image back — no API key, no manual alignment.
 </p>
 
 <p align="center">
@@ -17,14 +17,14 @@
 ## Why?
 
 Designers and photographers on X routinely split panoramas, ultrawide wallpapers,
-and tall strips across 2–4 carousel images to work around feed cropping. Saving
+and tall strips across several carousel images to work around feed cropping. Saving
 each slice at `name=orig` and stitching them together by hand gets old fast.
 `x-stitch` downloads every segment at original resolution in parallel and joins
 them back into a single JPEG.
 
 ## Highlights
 
-- 🧵 **Full-resolution originals.** Rewrites every media URL to `name=orig`
+- 🧵 **Full-resolution segments.** Rewrites every media URL to `name=orig`
   before downloading.
 - ⚡ **Parallel downloads.** Fetches all segments concurrently over a shared
   HTTP client with timeouts.
@@ -77,7 +77,7 @@ x-stitch <url> -q 90 --no-metadata
 | `<URLS>...` | (required) | One or more X/Twitter status URLs |
 | `-o, --out <DIR>` | `.` | Output directory (created automatically if missing) |
 | `-n, --name <NAME>` | `<user>-<id>.jpg` | Custom output filename (single URL only; `.jpg` appended if omitted) |
-| `-q, --quality <1-100>` | `95` | JPEG output quality |
+| `-q, --quality <1-100>` | `95` | JPEG quality of the stitched image (unused for a single JPEG photo) |
 | `--vertical` | `false` | Stitch segments top-to-bottom instead of left-to-right |
 | `--no-metadata` | `false` | Omit the source X URL from the JPEG `COM` comment marker |
 
@@ -95,5 +95,8 @@ x-stitch <url> -q 90 --no-metadata
   while the remaining posts still run. The process exits non-zero if any URL
   failed.
 - **Overwriting:** Writing to a path that already exists replaces the file.
-- **Single-photo posts:** Works fine — it downloads the `orig` image and saves
-  it as a JPEG with metadata intact.
+- **Re-encoding:** Stitching decodes every segment and encodes the result as
+  one JPEG, so the output is full resolution but not byte-identical to the
+  segments X serves.
+- **Single-photo posts:** A JPEG is saved exactly as X serves it, with only the
+  `COM` comment added. Any other format is re-encoded as JPEG.
