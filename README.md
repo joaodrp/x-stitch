@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.png" alt="An X post card with a split sunset panorama stitched together down the middle with orange thread forming an X" width="520">
+  <img src="docs/hero.webp" alt="An X post card with a split sunset panorama stitched together down the middle with orange thread forming an X" width="420">
 </p>
 
 ## Why?
