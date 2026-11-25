@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
+repository = "https://github.com/joaodrp/x-stitch"
+keywords = ["twitter", "x", "image", "stitch", "cli"]
+categories = ["command-line-utilities", "multimedia::images"]
+exclude = ["/.github", "/docs", "/release-please-config.json", "/.release-please-manifest.json"]
 description = "Download and stitch segmented X/Twitter carousel images into a single full-resolution image"
 
 [dependencies]
