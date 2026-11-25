@@ -108,9 +108,6 @@ fn main() -> Result<()> {
         bail!("--name cannot be empty");
     }
 
-    fs::create_dir_all(&cli.out)
-        .with_context(|| format!("failed to create output directory {}", cli.out.display()))?;
-
     let agent = build_agent(IO_TIMEOUT);
 
     let orientation = if cli.vertical {
@@ -210,6 +207,12 @@ fn process_tweet(
     let filename = resolve_filename(options.custom_name, screen_name, &tweet_ref.id);
     let out_path = options.out_dir.join(filename);
     let bytes = encode_jpeg(&stitched, options.quality, comment)?;
+    fs::create_dir_all(options.out_dir).with_context(|| {
+        format!(
+            "failed to create output directory {}",
+            options.out_dir.display()
+        )
+    })?;
     fs::write(&out_path, bytes)
         .with_context(|| format!("failed to write {}", out_path.display()))?;
 
