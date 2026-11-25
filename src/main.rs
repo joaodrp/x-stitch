@@ -380,6 +380,12 @@ fn stitch_images(images: &[DynamicImage], orientation: Orientation) -> Result<Rg
         .try_fold(0u32, |acc, img| acc.checked_add(dims(img).0))
         .context("stitched image size overflow")?;
     let across = images.iter().map(|img| dims(img).1).max().unwrap_or(0);
+    if images.iter().any(|img| dims(img).1 != across) {
+        eprintln!(
+            "warning: segments differ in {}; smaller ones are padded with black",
+            if vertical { "width" } else { "height" }
+        );
+    }
 
     let (width, height) = if vertical {
         (across, along)

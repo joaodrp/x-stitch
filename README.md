@@ -98,5 +98,8 @@ x-stitch <url> -q 90 --no-metadata
 - **Re-encoding:** Stitching decodes every segment and encodes the result as
   one JPEG, so the output is full resolution but not byte-identical to the
   segments X serves.
+- **Mismatched segments:** Segments are aligned to the top (or left with
+  `--vertical`). If their sizes differ, the gap is filled with black and a
+  warning is printed to `stderr`.
 - **Single-photo posts:** A JPEG is saved exactly as X serves it, with only the
   `COM` comment added. Any other format is re-encoded as JPEG.
