@@ -112,6 +112,12 @@ x-stitch <url> -q 90 --no-metadata
 - **Single-photo posts:** A JPEG is saved exactly as X serves it, with only the
   `COM` comment added. Any other format is re-encoded as JPEG.
 
+## How it works
+
+The pipeline, rendering rules and limits are in
+[docs/how-it-works.md](docs/how-it-works.md). To work on the code, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 [MIT](LICENSE)
