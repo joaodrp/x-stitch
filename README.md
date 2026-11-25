@@ -7,7 +7,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2024-orange" alt="Rust 2024">
-  <img src="https://img.shields.io/badge/auth-none-brightgreen" alt="No auth required">
 </p>
 
 <p align="center">
