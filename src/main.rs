@@ -12,7 +12,8 @@ use serde::Deserialize;
 
 const USER_AGENT: &str = concat!("x-stitch/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Per socket read or write, so a slow download survives as long as data keeps arriving.
+const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_IMAGE_BYTES: u64 = 100 * 1024 * 1024;
 
 #[derive(Parser, Debug)]
@@ -110,11 +111,7 @@ fn main() -> Result<()> {
     fs::create_dir_all(&cli.out)
         .with_context(|| format!("failed to create output directory {}", cli.out.display()))?;
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .user_agent(USER_AGENT)
-        .build();
+    let agent = build_agent(IO_TIMEOUT);
 
     let orientation = if cli.vertical {
         Orientation::Vertical
@@ -148,6 +145,15 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn build_agent(io_timeout: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(io_timeout)
+        .timeout_write(io_timeout)
+        .user_agent(USER_AGENT)
+        .build()
 }
 
 fn print_saved(saved: &SavedImage) {
@@ -429,6 +435,8 @@ fn encode_jpeg(img: &RgbImage, quality: u8, comment: Option<&str>) -> Result<Vec
 mod tests {
     use super::*;
     use image::{GenericImageView, Rgb};
+    use std::io::Write;
+    use std::net::TcpListener;
 
     #[test]
     fn parses_valid_urls() {
@@ -521,6 +529,36 @@ mod tests {
             assert!(safe_screen_name(bad).is_err(), "{bad:?} should be rejected");
         }
         assert_eq!(safe_screen_name("user_1").unwrap(), "user_1");
+    }
+
+    #[test]
+    fn slow_body_is_not_cut_off_while_data_keeps_arriving() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_nodelay(true).unwrap();
+            let _ = stream.read(&mut [0u8; 1024]);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n")
+                .unwrap();
+            for byte in b"data" {
+                thread::sleep(Duration::from_millis(100));
+                stream.write_all(&[*byte]).unwrap();
+            }
+        });
+
+        // The body takes 400ms in total, with at most 100ms between bytes.
+        let agent = build_agent(Duration::from_millis(250));
+        let mut body = Vec::new();
+        agent
+            .get(&format!("http://{addr}/"))
+            .call()
+            .unwrap()
+            .into_reader()
+            .read_to_end(&mut body)
+            .unwrap();
+        assert_eq!(body, b"data");
     }
 
     #[test]
